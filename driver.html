@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Кабінет</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 0; padding: 15px; background: #f0f2f5; color: #000; padding-bottom: 50px; }
+        .card { background: #fff; padding: 15px; border-radius: 12px; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); position: relative; }
+        .badge { display: inline-block; padding: 5px 10px; border-radius: 6px; font-size: 12px; font-weight: bold; color: white; margin-bottom: 10px; }
+        .label { font-size: 10px; color: #888; text-transform: uppercase; margin-top: 5px; }
+        .addr { font-size: 15px; font-weight: 600; line-height: 1.3; }
+        .btn { width: 100%; padding: 12px; border: none; border-radius: 8px; background: #2ea043; color: white; font-weight: bold; font-size: 16px; margin-top: 10px; }
+        .active-card { border: 2px solid #2ea043; background: #f0fff4; }
+        .link-switch { text-align: center; margin-top: 20px; font-size: 14px; }
+        a { color: #777; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <h3 style="text-align:center; margin-top:0">🚖 Ефір замовлень</h3>
+    <div id="current-job"></div>
+    <div id="list">Завантаження...</div>
+
+    <div class="link-switch">
+        <a href="client.html">🙋‍♂️ Замовити послугу собі</a>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready(); tg.expand();
+        if(tg.keepScreenOn) tg.keepScreenOn = true;
+
+        const driverId = tg.initDataUnsafe?.user?.id;
+        let myOrderId = null;
+        let previousOrderCount = 0;
+
+        // 🔊 ЗВУК СПОВІЩЕННЯ
+        const soundNewOrder = new Audio('alert.mp3');
+
+        function getBadge(type) {
+            let color = '#3390ec'; // Інше
+            if (type && type.includes('Вантаж')) color = '#d32f2f';
+            if (type && type.includes('Таксі')) color = '#f9a825';
+            if (type && type.includes('Буксир')) color = '#e64a19';
+            return `<span class="badge" style="background:${color}">${type}</span>`;
+        }
+
+        function update() {
+            fetch('/get-orders').then(r => r.json()).then(orders => {
+                const list = document.getElementById('list');
+                if (myOrderId) { list.style.display = 'none'; return; }
+                
+                list.style.display = 'block';
+                list.innerHTML = orders.length ? '' : '<p style="text-align:center;color:#999">Замовлень немає...</p>';
+                
+                if (orders.length > previousOrderCount) {
+                    soundNewOrder.play().catch(e=>{});
+                    tg.HapticFeedback.notificationOccurred('warning');
+                }
+                previousOrderCount = orders.length;
+
+                orders.forEach(o => {
+                    const div = document.createElement('div');
+                    div.className = 'card';
+                    div.innerHTML = `
+                        ${getBadge(o.serviceType)}
+                        <div class="label">Звідки</div><div class="addr">📍 ${o.fromAddress}</div>
+                        <div class="label">Куди</div><div class="addr">🏁 ${o.toAddress}</div>
+                        <button class="btn" onclick="take(${o.id})">Прийняти</button>
+                    `;
+                    list.appendChild(div);
+                });
+            });
+        }
+
+        window.take = (id) => {
+            tg.HapticFeedback.impactOccurred('heavy');
+            fetch('/accept-order', {
+                method: 'POST', headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({ orderId: id, driverId })
+            }).then(r => r.json()).then(res => {
+                if(res.message === 'Success') {
+                    myOrderId = id;
+                    document.getElementById('current-job').innerHTML = `
+                        <div class="card active-card">
+                            <h3 style="color:green;margin-top:0;text-align:center">🚀 В роботі</h3>
+                            <p style="text-align:center">Зв'яжіться з клієнтом.</p>
+                            <button class="btn" style="background:#3390ec" onclick="tg.close()">💬 Чат з клієнтом</button>
+                            <br>
+                            <button class="btn" style="background:#555" onclick="location.reload()">🏁 Завершити</button>
+                        </div>
+                    `;
+                } else tg.showAlert('Вже зайнято!');
+            });
+        }
+
+        setInterval(update, 2000);
+        update();
+    </script>
+</body>
+</html>

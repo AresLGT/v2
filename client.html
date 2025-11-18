@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Замовлення</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            margin: 0; padding: 0;
+            background-color: var(--tg-theme-bg-color, #f0f2f5);
+            color: var(--tg-theme-text-color, #000);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            min-height: 100vh;
+        }
+        .app-container {
+            width: 90%; max-width: 400px;
+            background-color: var(--tg-theme-secondary-bg-color, #ffffff);
+            padding: 25px 20px; border-radius: 24px;
+            box-shadow: 0 10px 25px rgba(0,0,0, 0.08);
+        }
+        h1 { margin: 0 0 20px; font-size: 22px; text-align: center; }
+        
+        /* СІТКА ПОСЛУГ (2x2) */
+        .services-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+        .service-card {
+            border: 2px solid transparent; background: var(--tg-theme-bg-color, #f5f5f5);
+            padding: 15px 10px; border-radius: 12px; text-align: center; cursor: pointer; transition: all 0.2s;
+        }
+        .service-card.selected { border-color: var(--tg-theme-button-color, #3390ec); background: rgba(51, 144, 236, 0.1); }
+        .icon { font-size: 28px; display: block; margin-bottom: 5px; }
+        .s-name { font-size: 14px; font-weight: 600; }
+
+        input {
+            width: 100%; padding: 14px; margin-bottom: 10px; border: none;
+            background-color: var(--tg-theme-bg-color, #f5f5f5);
+            border-radius: 12px; box-sizing: border-box; outline: none;
+            color: var(--tg-theme-text-color, #000);
+        }
+        .main-btn {
+            width: 100%; padding: 16px; font-size: 16px; font-weight: bold; border: none;
+            border-radius: 16px; background-color: var(--tg-theme-button-color, #3390ec);
+            color: var(--tg-theme-button-text-color, #ffffff); cursor: pointer; margin-top: 10px;
+        }
+        .main-btn:disabled { opacity: 0.6; }
+    </style>
+</head>
+<body>
+    <div class="app-container" id="form-container">
+        <h1>🛠 Оберіть послугу</h1>
+        <div class="services-grid">
+            <div class="service-card selected" onclick="selectService(this, 'Таксі 🚕')">
+                <span class="icon">🚖</span><span class="s-name">Таксі</span>
+            </div>
+            <div class="service-card" onclick="selectService(this, 'Вантажний 🚚')">
+                <span class="icon">🚚</span><span class="s-name">Вантаж</span>
+            </div>
+            <div class="service-card" onclick="selectService(this, 'Кур\'єр 📦')">
+                <span class="icon">📦</span><span class="s-name">Кур'єр</span>
+            </div>
+            <div class="service-card" onclick="selectService(this, 'Буксир 🪝')">
+                <span class="icon">🪝</span><span class="s-name">Буксир</span>
+            </div>
+        </div>
+        <input type="text" id="from" placeholder="Звідки?">
+        <input type="text" id="to" placeholder="Куди?">
+        <button class="main-btn" id="btn" onclick="sendOrder()">Замовити</button>
+    </div>
+
+    <div class="app-container" id="status" style="display:none; text-align:center;">
+        <div style="font-size:40px; margin-bottom:10px;">⏳</div>
+        <h3>Шукаємо виконавця...</h3>
+        <p id="status-text">Для послуги: <b id="selected-service-display"></b></p>
+    </div>
+
+    <div class="app-container" id="success" style="display:none; text-align:center;">
+        <div style="font-size:50px;">✅</div>
+        <h3>Виконавця знайдено!</h3>
+        <p style="color:green">Він вже виїжджає.</p>
+        <button class="main-btn" onclick="window.Telegram.WebApp.close()">💬 Чат з водієм</button>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready(); tg.expand();
+
+        // 🔊 ЗВУК УСПІХУ
+        const soundSuccess = new Audio('success.mp3');
+        let selectedType = 'Таксі 🚕'; 
+
+        function selectService(el, type) {
+            document.querySelectorAll('.service-card').forEach(c => c.classList.remove('selected'));
+            el.classList.add('selected');
+            selectedType = type;
+            tg.HapticFeedback.selectionChanged();
+        }
+
+        function sendOrder() {
+            const from = document.getElementById('from').value;
+            const to = document.getElementById('to').value;
+            const userId = tg.initDataUnsafe?.user?.id;
+
+            if(!from || !to) return tg.showAlert("Заповніть адреси!");
+            
+            document.getElementById('btn').disabled = true;
+            document.getElementById('btn').innerText = "Зачекайте...";
+
+            fetch('/order', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ userId, fromAddress: from, toAddress: to, serviceType: selectedType })
+            }).then(r => r.json()).then(data => {
+                document.getElementById('form-container').style.display = 'none';
+                document.getElementById('status').style.display = 'block';
+                document.getElementById('selected-service-display').innerText = selectedType;
+
+                const interval = setInterval(() => {
+                    fetch(`/check-order/${data.orderId}`).then(r => r.json()).then(res => {
+                        if(res.status === 'accepted') {
+                            clearInterval(interval);
+                            soundSuccess.play().catch(()=>{});
+                            tg.HapticFeedback.notificationOccurred('success');
+                            document.getElementById('status').style.display = 'none';
+                            document.getElementById('success').style.display = 'block';
+                        }
+                    });
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>
