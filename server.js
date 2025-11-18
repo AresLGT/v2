@@ -5,11 +5,11 @@ const fs = require('fs');
 const path = require('path');
 
 // --- ⚙️ НАЛАШТУВАННЯ (ПЕРЕВІРТЕ СВОЇ ДАНІ) ---
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const ADMIN_ID = parseInt(process.env.TELEGRAM_ADMIN_ID || '0');
-const WEB_APP_URL = process.env.PUBLIC_APP_URL || `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
+const TOKEN = 'ВАШ_ТОКЕН_ВІД_BOTFATHER'; 
+const ADMIN_ID = 7677921905; // Ваш ID
+const WEB_APP_URL = 'https://ВАШ_ДОМЕН_АБО_IP.nip.io'; 
 const DB_PATH = './db.json';
-const PORT = parseInt(process.env.PORT || '5000');
+const PORT = process.env.PORT || 3000;
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 const app = express();
