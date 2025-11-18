@@ -4,12 +4,12 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 
-// --- ⚙️ НАЛАШТУВАННЯ (ЗАПОВНІТЬ ЦЕ) ---
-const TOKEN = '8580831379:AAHY1i-mNZ3XN49SZ7VeiwoqGrv-y3HUysk'; 
-const ADMIN_ID = 7677921905; // Ваш ID
-const WEB_APP_URL = 'https://ВАШ_IP_СЕРВЕРА.nip.io'; // Наприклад: https://91.234.56.78.nip.io
+// --- ⚙️ НАЛАШТУВАННЯ (ПЕРЕВІРТЕ СВОЇ ДАНІ) ---
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const ADMIN_ID = parseInt(process.env.TELEGRAM_ADMIN_ID || '0');
+const WEB_APP_URL = process.env.PUBLIC_APP_URL || `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
 const DB_PATH = './db.json';
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT || '5000');
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 const app = express();
@@ -23,8 +23,15 @@ if (!fs.existsSync(DB_PATH)) fs.writeFileSync(DB_PATH, JSON.stringify({ users: {
 function getUser(userId, username = '') {
     const db = JSON.parse(fs.readFileSync(DB_PATH));
     if (!db.users[userId]) {
-        db.users[userId] = { role: 'client', username, customName: null };
+        // Якщо це ваш ID - зразу даємо адмінку
+        const role = (String(userId) === String(ADMIN_ID)) ? 'admin' : 'client';
+        db.users[userId] = { role: role, username, customName: null };
         fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
+    }
+    // Перестраховка: якщо ви в базі, але роль не адмін, хоча ID співпадає
+    if (String(userId) === String(ADMIN_ID) && db.users[userId].role !== 'admin') {
+         db.users[userId].role = 'admin';
+         fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2));
     }
     return db.users[userId];
 }
@@ -47,13 +54,16 @@ function setDriverName(userId, newName) {
     return false;
 }
 
+// ВИПРАВЛЕНО: Тепер показує і Адмінів у списку
 function getAllDrivers() {
     const db = JSON.parse(fs.readFileSync(DB_PATH));
     let list = [];
     for (let id in db.users) {
-        if (db.users[id].role === 'driver_approved') {
-            let name = db.users[id].customName || db.users[id].username;
-            list.push(`🆔 <code>${id}</code> — ${name}`);
+        // Додаємо у список, якщо роль 'driver_approved' АБО 'admin'
+        if (db.users[id].role === 'driver_approved' || db.users[id].role === 'admin') {
+            let name = db.users[id].customName || db.users[id].username || "Без імені";
+            let roleLabel = (db.users[id].role === 'admin') ? '👑' : '🚖';
+            list.push(`${roleLabel} 🆔 <code>${id}</code> — ${name}`);
         }
     }
     return list.join('\n');
@@ -72,10 +82,22 @@ bot.onText(/\/start/, (msg) => {
     const user = getUser(userId, msg.from.first_name);
     let text = `Привіт, ${user.customName || user.username}!`;
     
-    if (user.role === 'admin') text += '\n👑 Ви Адмін.\n/drivers - Список водіїв\n/setname ID ІМ\'Я - Змінити ім\'я';
+    // Кнопки одразу при старті
+    let keyboard = [[{ text: '📱 Замовити послугу', web_app: { url: WEB_APP_URL + '/client.html' } }]];
+
+    if (user.role === 'admin') {
+        text += '\n👑 Ви Адміністратор і Водій.\n\n<b>Команди:</b>\n/drivers - Список всіх водіїв\n/setname ID ІМ\'Я - Змінити ім\'я';
+        keyboard = [
+            [{ text: '💼 Я виконавець', web_app: { url: WEB_APP_URL + '/driver.html' } }],
+            [{ text: '🙋‍♂️ Я клієнт', web_app: { url: WEB_APP_URL + '/client.html' } }]
+        ];
+    }
     else if (user.role === 'client') text += '\nХочете стати водієм? Тисніть /register_driver';
     
-    bot.sendMessage(userId, text);
+    bot.sendMessage(userId, text, { 
+        parse_mode: 'HTML',
+        reply_markup: { keyboard, resize_keyboard: true }
+    });
 });
 
 // Адмінські команди
@@ -92,7 +114,7 @@ bot.onText(/\/setname (\d+) (.+)/, (msg, match) => {
     if (setDriverName(targetId, newName)) {
         bot.sendMessage(msg.chat.id, `✅ Ім'я змінено на: <b>${newName}</b>`, { parse_mode: 'HTML' });
     } else {
-        bot.sendMessage(msg.chat.id, "❌ Юзера не знайдено.");
+        bot.sendMessage(msg.chat.id, "❌ Юзера не знайдено (він має хоч раз запустити бота).");
     }
 });
 
@@ -100,9 +122,11 @@ bot.onText(/\/setname (\d+) (.+)/, (msg, match) => {
 bot.onText(/\/app/, (msg) => {
     const userId = msg.from.id;
     const user = getUser(userId);
+    
     let messageText = '👋 Куди поїдемо?';
     let keyboard = [[{ text: '📱 Замовити послугу', web_app: { url: WEB_APP_URL + '/client.html' } }]];
 
+    // ВИПРАВЛЕНО: Адмін теж бачить кнопки водія
     if (user.role === 'driver_approved' || user.role === 'admin') {
         messageText = '👋 Оберіть режим:';
         keyboard = [
@@ -122,7 +146,10 @@ bot.onText(/\/app/, (msg) => {
 bot.onText(/\/register_driver/, (msg) => {
     const userId = msg.from.id;
     const user = getUser(userId);
+    
+    if (user.role === 'admin') return bot.sendMessage(userId, 'Ви Адмін, ви вже маєте доступ водія! Тисніть /app');
     if (user.role === 'driver_approved') return bot.sendMessage(userId, 'Ви вже водій.');
+    
     updateUserRole(userId, 'driver_pending');
     bot.sendMessage(userId, 'Заявка прийнята.');
     bot.sendMessage(ADMIN_ID, `🔔 Заявка: ${msg.from.first_name} (ID: <code>${userId}</code>)`, {
